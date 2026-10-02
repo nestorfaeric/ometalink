@@ -1,0 +1,43 @@
+#!/usr/bin/env bash
+# Control Ray-Ban Meta glasses from the Omarchy bar.
+#
+#   ometalink-ctl connect|disconnect|toggle|output|volume <+5|-5> [MAC]
+set -euo pipefail
+
+bin_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+
+action="${1:-}"
+shift || true
+arg=""
+if [[ $action == volume ]]; then
+  arg="${1:-}"
+  shift || true
+fi
+
+status="$("$bin_dir/ometalink-status" "${1:-}")"
+mac="$(jq -r '.mac // empty' <<<"$status")"
+connected="$(jq -r '.connected' <<<"$status")"
+sink="$(jq -r '.sink // empty' <<<"$status")"
+
+[[ -n $mac ]] || { echo "No Ray-Ban Meta glasses paired" >&2; exit 1; }
+
+case "$action" in
+  connect) bluetoothctl connect "$mac" ;;
+  disconnect) bluetoothctl disconnect "$mac" ;;
+  toggle)
+    if [[ $connected == true ]]; then bluetoothctl disconnect "$mac"
+    else bluetoothctl connect "$mac"; fi
+    ;;
+  output)
+    [[ -n $sink ]] || { echo "Glasses are not an audio output yet" >&2; exit 1; }
+    pactl set-default-sink "$sink"
+    ;;
+  volume)
+    [[ -n $sink && $arg =~ ^[+-][0-9]+$ ]] || { echo "Usage: ometalink-ctl volume <+N|-N>" >&2; exit 1; }
+    pactl set-sink-volume "$sink" "${arg}%"
+    ;;
+  *)
+    echo "Usage: ometalink-ctl connect|disconnect|toggle|output|volume <+N|-N> [MAC]" >&2
+    exit 1
+    ;;
+esac

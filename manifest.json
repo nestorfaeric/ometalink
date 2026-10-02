@@ -1,0 +1,44 @@
+{
+  "schemaVersion": 1,
+  "id": "io.github.nestorfaeric.ometalink",
+  "name": "OmetaLink",
+  "version": "0.1.0",
+  "author": "Faeric",
+  "license": "MIT",
+  "description": "Ray-Ban Meta glasses status for the Omarchy bar: connection, codec, playback, volume and battery when reported, with connect/disconnect controls.",
+  "keywords": [
+    "ray-ban",
+    "meta",
+    "glasses",
+    "bluetooth",
+    "audio"
+  ],
+  "kinds": [
+    "bar-widget"
+  ],
+  "entryPoints": {
+    "barWidget": "BarWidget.qml"
+  },
+  "barWidget": {
+    "displayName": "OmetaLink",
+    "description": "Ray-Ban Meta glasses status and controls",
+    "category": "Audio",
+    "aliases": [
+      "rayban",
+      "glasses",
+      "meta"
+    ],
+    "allowMultiple": false,
+    "defaultSection": "right",
+    "defaults": {
+      "address": "",
+      "pollSeconds": 15,
+      "hideWhenDisconnected": false
+    },
+    "schema": [
+      { "key": "address", "type": "string", "label": "Glasses Bluetooth address", "defaultValue": "", "description": "Leave empty to detect paired Ray-Ban Meta glasses automatically." },
+      { "key": "pollSeconds", "type": "integer", "label": "Fallback refresh (seconds)", "min": 5, "max": 300, "step": 5, "defaultValue": 15 },
+      { "key": "hideWhenDisconnected", "type": "boolean", "label": "Hide the icon while the glasses are disconnected", "defaultValue": false }
+    ]
+  }
+}

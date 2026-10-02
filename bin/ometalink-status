@@ -1,0 +1,93 @@
+#!/usr/bin/env bash
+# Print the state of paired Ray-Ban Meta glasses as one line of JSON.
+#
+#   ometalink-status [MAC]
+#
+# Without MAC, the first paired device that looks like Ray-Ban Meta glasses
+# (Meta's Bluetooth vendor id 0x01AB, or a "RB Meta"/"Ray-Ban" name) is used,
+# preferring a connected one.
+set -uo pipefail
+
+META_VENDOR="v01AB"
+
+device_info() { bluetoothctl info "$1" 2>/dev/null; }
+
+is_glasses() {
+  local info="$1"
+  grep -q "Modalias: bluetooth:${META_VENDOR}" <<<"$info" && return 0
+  grep -Eqi '^\s*Name: .*(RB Meta|Ray-Ban|Meta Glasses|Oakley Meta)' <<<"$info"
+}
+
+find_device() {
+  local mac info fallback=""
+  while read -r _ mac _; do
+    [[ -n $mac ]] || continue
+    info="$(device_info "$mac")"
+    is_glasses "$info" || continue
+    if grep -q "Connected: yes" <<<"$info"; then
+      echo "$mac"
+      return
+    fi
+    [[ -n $fallback ]] || fallback="$mac"
+  done < <(bluetoothctl devices Paired 2>/dev/null)
+  echo "$fallback"
+}
+
+mac="${1:-}"
+[[ -n $mac ]] || mac="$(find_device)"
+
+if [[ -z $mac ]]; then
+  jq -cn '{found: false, connected: false}'
+  exit 0
+fi
+
+info="$(device_info "$mac")"
+name="$(sed -n 's/^\s*Alias: //p' <<<"$info" | head -n1)"
+connected=false
+grep -q "Connected: yes" <<<"$info" && connected=true
+
+node="bluez_output.${mac//:/_}"
+sink="{}"
+transport_state=""
+if [[ $connected == true ]]; then
+  sink="$(pactl -f json list sinks 2>/dev/null | jq -c --arg node "$node" '
+    [.[] | select(.name | startswith($node))][0] // {}
+    | {
+        sink: (.name // null),
+        profile: (.properties["api.bluez5.profile"] // null),
+        codec: (.properties["api.bluez5.codec"] // null),
+        volume: ((.volume["front-left"].value_percent // "") | rtrimstr("%") | tonumber? // null),
+        muted: (.mute // false)
+      }' 2>/dev/null)"
+  [[ -n $sink ]] || sink="{}"
+
+  dev_path="/org/bluez/hci0/dev_${mac//:/_}"
+  transport="$(busctl tree org.bluez --list 2>/dev/null | grep -m1 "^${dev_path}/sep[0-9]*/fd[0-9]*$")"
+  if [[ -n $transport ]]; then
+    transport_state="$(busctl get-property org.bluez "$transport" org.bluez.MediaTransport1 State 2>/dev/null | awk -F'"' '{print $2}')"
+  fi
+fi
+
+battery="$(busctl get-property org.bluez "/org/bluez/hci0/dev_${mac//:/_}" org.bluez.Battery1 Percentage 2>/dev/null | awk '{print $2}')"
+
+# Microphone and camera are not reachable from Linux: the glasses' firmware
+# drops the hands-free (HFP) link right after the handshake with any gateway
+# other than the Meta AI phone app, and the camera is only exposed to that app.
+jq -cn \
+  --arg mac "$mac" \
+  --arg name "$name" \
+  --argjson connected "$connected" \
+  --argjson sink "$sink" \
+  --arg transport "$transport_state" \
+  --arg battery "$battery" \
+  '{
+    found: true,
+    mac: $mac,
+    name: $name,
+    connected: $connected,
+    playing: ($transport == "active"),
+    transport: (if $transport == "" then null else $transport end),
+    battery: ($battery | tonumber? // null),
+    microphone: "unsupported",
+    camera: "unsupported"
+  } + {profile: null, codec: null, volume: null, muted: false, sink: null} + $sink'
